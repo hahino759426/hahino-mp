@@ -1,5 +1,24 @@
 # Hahino MP — the core multi-path neural network
 
+> **What if the network decided its own architecture — and never
+> forgot anything it learned?**
+>
+> Hahino MP is a neural network with **no hand-set widths, no router,
+> and no forgetting**. Its loss signal grows the structure: paths
+> widen when a class struggles, split when they plateau, and are
+> pruned when they hallucinate. Competition is a parameter-free
+> winner-take-all, not a softmax. And when you teach it a new domain,
+> the old ones don't degrade — **they improve** (measured: frozen
+> digits 96.4% -> 97.7% after 26 letters and 10 fashion classes were
+> added). No replay buffers, no EWC, no rehearsal — retention by
+> architecture, not by constraint.
+>
+> Everything is measured and reproducible: three runnable demos, a
+> 9-test suite, and every number in this file comes from a committed
+> run on a single RTX 5060.
+
+---
+
 The self-structuring multi-path (MP) neural network at the heart of
 the **Hahino Brain** research project, extracted as a standalone,
 dependency-light package (PyTorch + NumPy only).
