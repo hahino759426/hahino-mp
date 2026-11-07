@@ -200,6 +200,6 @@ zero-init so birth cannot leak into old columns.
    that vision-style growth transfers nowhere — patience, not
    capacity, is the ceiling at these widths).
 
-## License
 
-MIT (see LICENSE).
+
+MIT (license file generated on GitHub).
