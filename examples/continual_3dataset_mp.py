@@ -80,20 +80,29 @@ def load_fashion():
     return (x_tr, tr.targets.long()), (x_te, te.targets.long())
 
 
-def train_phase(model, loader, epochs, phase_name):
+def train_phase(model, loader, epochs, phase_name, class_ids):
+    """Train on one phase's classes with the softmax masked to THOSE
+    classes. Masking is the single-brain form of the architecture's
+    'paths never compete cross-domain' law (the research stack
+    enforces it with the domain gate): a 36/46-way softmax lets every
+    new specialist push every old class's head rows negative, and the
+    SUM readout then swamps the frozen domains (measured: digits
+    96.8% -> 0.0% after letters). With the mask, the zero-init rows
+    for other domains stay zero for life."""
     model.train()
+    lo = class_ids[0]
     for epoch in range(epochs):
         t0 = time.time()
         total_loss = correct = total = 0
         for data, target in loader:
             data, target = data.to(DEVICE), target.to(DEVICE)
             model.pool_adam.zero_grad()
-            logits = model(data)
-            loss = F.cross_entropy(logits, target)
+            logits = model(data)[:, class_ids]
+            loss = F.cross_entropy(logits, target - lo)
             loss.backward()
             model.pool_adam.step()
             total_loss += loss.item()
-            correct += logits.argmax(dim=1).eq(target).sum().item()
+            correct += logits.argmax(dim=1).eq(target - lo).sum().item()
             total += target.size(0)
         print(f'  [{phase_name} ep{epoch}] loss '
               f'{total_loss/len(loader):.4f} '
@@ -160,7 +169,7 @@ def main():
     x, y = maybe_subset(xd_tr, yd_tr)
     loader = DataLoader(TensorDataset(x, y), batch_size=BATCH_SIZE,
                         shuffle=True)
-    train_phase(model, loader, args.epochs, 'digits')
+    train_phase(model, loader, args.epochs, 'digits', DIGITS)
     doms = [('digits', (xd_te, yd_te), DIGITS)]
     acc = per_domain_acc(model, doms)
     retention.append(('after digits (baseline)', acc))
@@ -176,7 +185,7 @@ def main():
                         shuffle=True)
     calib = xl_te[:1024].to(DEVICE)
     for epoch in range(args.epochs):
-        train_phase(model, loader, 1, 'letters')
+        train_phase(model, loader, 1, 'letters', LETTERS)
         if epoch > 0 and epoch % 2 == 0 \
                 and epoch <= args.growth_last_epoch:
             model.maintain(loader, epoch, calib)
@@ -199,7 +208,7 @@ def main():
                         shuffle=True)
     calib = xf_te[:1024].to(DEVICE)
     for epoch in range(args.epochs):
-        train_phase(model, loader, 1, 'fashion')
+        train_phase(model, loader, 1, 'fashion', FASHION)
         if epoch > 0 and epoch % 2 == 0 \
                 and epoch <= args.growth_last_epoch:
             model.maintain(loader, epoch, calib)
