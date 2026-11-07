@@ -154,3 +154,28 @@ def test_freeze_and_birth_classes():
     assert all(descs0 == d_ for d_ in [descs0])  # untouched reference
     assert b.class_params(0) == sum(path_params(dd) for dd in descs0)
     assert b.pool.numel() >= pool_before
+
+
+def test_freeze_survives_growth_rebuild():
+    """Regression: rebuild_pool must re-register the freeze hook."""
+    torch.manual_seed(0)
+    b = MPBrain(num_classes=3, in_dim=10, initial_neurons=6,
+                target_class_loss=0.05)
+    b.freeze_classes([0])
+    x = torch.randn(16, 10)
+    y = torch.tensor([1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2])
+    # force growth on unfrozen classes -> rebuild_pool fires
+    b.pool_adam.zero_grad()
+    loss = torch.nn.functional.cross_entropy(b(x), y)
+    loss.backward()
+    b.pool_adam.step()
+    op = b.plan_growth(1, 0, 'widen', 2)
+    b.rebuild_pool([op])
+    # the pool Parameter was swapped; the freeze hook must still fire
+    b.pool_adam.zero_grad()
+    loss = torch.nn.functional.cross_entropy(b(x), y)
+    loss.backward()
+    d = b.descs[0][0]
+    g = b.pool.grad
+    assert g[d[0][1]:d[0][1] + d[0][3] * d[0][4]].abs().sum().item() == 0.0
+    assert g[d[1][1]:d[1][1] + d[1][3] * d[1][4]].abs().sum().item() == 0.0

@@ -693,6 +693,8 @@ class MPBrain(nn.Module):
         self.pool_adam.carry_to(new_pool, index_map)
         self.pool = new_pool
         self.descs = new_descs
+        self._freeze_mask_cache = None
+        self._register_freeze_hook()
         self._build_fast()
 
     # ---- maintenance: measure, grow, clean --------------------------------
