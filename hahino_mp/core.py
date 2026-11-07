@@ -366,6 +366,11 @@ class MPBrain(nn.Module):
 
     def _forward_fast(self, x):
         f = self._fast
+        if f['idx1'].device != x.device:
+            # plain-dict tensors do not follow module .to(device);
+            # rebuild the fast-path indices on the input's device
+            self._build_fast()
+            f = self._fast
         W1 = self.pool[f['idx1']].view(-1, self.in_dim)
         b1 = self.pool[f['idxb1']]
         h = F.relu(F.linear(x, W1, b1))
