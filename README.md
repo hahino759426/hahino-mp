@@ -108,23 +108,31 @@ digits replay batch (36-way CE); the freeze hook keeps digits
 immutable while letters paths learn calibrated digit-column
 suppression from real digit data. Measured 2026-11-07:
 
-3-domain measured table (2026-11-07, full test sets):
+3-domain measured table (2026-11-07, full test sets, FULL
+LIFECYCLE: growth -> dead-neuron cleanup -> maturation at lr 5e-5
+with best-checkpoint selection):
 
 | | digits | letters | fashion |
 |---|---|---|---|
-| baseline | 96.44% | — | — |
-| after letters | 97.74% (+1.30) | 89.27% | — |
-| after fashion | **97.82% (+1.38)** | **90.24% (+0.97)** | 85.64% |
+| baseline | 97.33% (mat. +0.89) | — | — |
+| after letters | 97.55% (+0.22) | **91.02%** (mat. +1.75) | — |
+| after fashion | **97.72% (+0.39)** | 90.30% (-0.73) | **87.36%** (mat. +1.72) |
 
-Every frozen domain IMPROVES as later domains are added — monotone,
-no decay. The record for this protocol was "digits IMPROVED +0.10
-through joint sum training" — the direction reproduces and the gain
-is larger on this core (the replay-side calibration does real work;
-frozen weights never move; the improvement is the new paths'
-calibrated suppression learned from replay batches). Both continual
-recipes in this repo are therefore measured, not assumed:
-sovereign-brains+gate = exact retention; shared pool + replay =
-retention WITH improvement.
+Maturation gain per phase: +0.89 / +1.75 / +1.72 — the research
+lifecycle's "worth ~+1.1 points every time" reproduces. Letters at
+91.02% is within half a point of the research champion (91.53, which
+additionally used neuron-fork surgery). Two measured trade-offs to
+know: (1) frozen domains still IMPROVE through replay-side
+calibration (digits +0.39 by the end); (2) without a gate, the third
+domain costs letters -0.73 via OOD misfire (fashion paths fire on
+letter inputs) — replay maximizes per-domain quality, only the gate
+(below) gives exact retention. The record for this protocol was
+"digits IMPROVED +0.10 through joint sum training" — the direction
+reproduces on this core (frozen weights never move; the improvement
+is the new paths' calibrated suppression learned from replay
+batches). Both continual recipes in this repo are therefore measured,
+not assumed: sovereign-brains+gate = exact retention; shared pool +
+replay = higher per-domain accuracy with small cross-domain cost.
 
 The single-brain class-incremental variant is kept as
 `examples/class_incremental_stress.py` — a MEASURED NEGATIVE: one

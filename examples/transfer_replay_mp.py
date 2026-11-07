@@ -101,6 +101,47 @@ def maybe_subset(x, y, n):
     return x[idx], y[idx]
 
 
+def maturate(model, loader, x_val, y_val, class_ids=None, epochs=3,
+             lr=5e-5):
+    """Maturation: low-LR fine-tune with best-checkpoint selection.
+
+    The research lifecycle stage worth ~+1.1 points every time
+    (hahino_v10_system_polish.py): after growth, polish at low LR and
+    keep the best checkpoint. Growth finds the architecture;
+    maturation settles its weights. No growth happens here.
+    """
+    import copy
+    old_lr = model.pool_adam.lr
+    model.pool_adam.lr = lr
+    model.pool_adam.t = 0
+    lo = class_ids[0] if class_ids is not None else 0
+    best_acc, best = -1.0, None
+    for ep in range(epochs):
+        model.train()
+        for data, target in loader:
+            data, target = data.to(DEVICE), target.to(DEVICE)
+            model.pool_adam.zero_grad()
+            logits = model(data)
+            if class_ids is not None:
+                logits = logits[:, class_ids]
+                target = target - lo
+            loss = F.cross_entropy(logits, target)
+            loss.backward()
+            model.pool_adam.step()
+        acc = accuracy(model, x_val, y_val)
+        print(f'    [maturation ep{ep}] val {acc:.2f}%')
+        if acc > best_acc:
+            best_acc, best = acc, copy.deepcopy(model)
+    final_acc = accuracy(model, x_val, y_val)
+    if best is not None and best_acc >= final_acc:
+        model.pool.data.copy_(best.pool.data)
+        model.descs = best.descs
+        model._build_fast()
+    model.pool_adam.lr = old_lr
+    model.eval()
+    return best_acc
+
+
 @torch.no_grad()
 def accuracy(model, x, y):
     x, y = x.to(DEVICE), y.to(DEVICE)
@@ -157,6 +198,10 @@ def main():
         if epoch > 0 and epoch % 2 == 0 and epoch <= 6:
             model.maintain(loader, epoch, xd_te[:1024].to(DEVICE),
                            verbose=False)
+    print('  maturation (low-LR polish + best checkpoint):')
+    maturate(model, loader, xd_te, yd_te)
+    print('  maturation (low-LR polish + best checkpoint):')
+    maturate(model, loader, xd_te, yd_te)
     digits_A = accuracy(model, xd_te, yd_te)
     print(f'  digits: {digits_A:.2f}%\n')
 
@@ -208,6 +253,11 @@ def main():
         if epoch > 0 and epoch % 2 == 0 and epoch <= 6:
             model.maintain(letters_loader, epoch, calib, verbose=False)
 
+    print('  maturation (letters):')
+    maturate(model, letters_loader, xl_te, yl_te,
+             class_ids=LETTERS)
+    print('  maturation (letters + replay):')
+    maturate(model, letters_loader, xl_te, yl_te)
     digits_B = accuracy(model, xd_te, yd_te)
     letters_B = accuracy(model, xl_te, yl_te)
     print(f'\n  digits  after transfer: {digits_B:.2f}%  '
@@ -270,6 +320,11 @@ def main():
         if epoch > 0 and epoch % 2 == 0 and epoch <= 6:
             model.maintain(fashion_loader, epoch, calib, verbose=False)
 
+    print('  maturation (fashion):')
+    maturate(model, fashion_loader, xf_te, yf_te,
+             class_ids=FASHION)
+    print('  maturation (fashion + replay):')
+    maturate(model, fashion_loader, xf_te, yf_te)
     digits_C = accuracy(model, xd_te, yd_te)
     letters_C = accuracy(model, xl_te, yl_te)
     fashion_C = accuracy(model, xf_te, yf_te)
