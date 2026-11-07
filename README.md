@@ -202,4 +202,4 @@ zero-init so birth cannot leak into old columns.
 
 
 
-MIT (license file generated on GitHub).
+MIT (see LICENSE).
