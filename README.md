@@ -52,11 +52,43 @@ This is the machinery behind Papers 2–3 of the Hahino Brain series
 ## Install & run
 
 ```bash
-pip install torch numpy torchvision   # torchvision only for the demo
+pip install torch numpy torchvision   # torchvision only for the demos
 python -m pytest tests/               # CPU smoke tests, no dataset
-python examples/mnist_mp.py           # full MNIST run (auto-downloads)
+python examples/mnist_mp.py           # single-task MNIST run
 python examples/mnist_mp.py --epochs 3 --subset 20000   # quick CPU pass
+python examples/continual_3dataset_mp.py  # digits -> letters -> fashion,
+                                          # no replay (see below)
 ```
+
+## Continual learning: 3 datasets, no catastrophic forgetting
+
+`examples/continual_3dataset_mp.py` runs the project's
+class-incremental protocol on one brain:
+
+1. **Phase A** — train digits (MNIST). Report per-domain accuracy.
+2. `freeze_classes(digits)` — from here the digits' parameters are
+   **immutable**: a gradient mask on the flat pool (registered hook)
+   plus growth-ladder exclusion in `maintain()`. Freeze sovereignty
+   (Law 4) at class granularity.
+3. **Phase B** — `birth_classes(26)` adds EMNIST-letter classes
+   (orientation fix `transpose + flip` applied). Existing paths are
+   re-headed to the new class count with the new classes' columns
+   **zero-init** (the research-sanctioned class-growth init — it
+   prevents leak into old columns), so old outputs are unchanged.
+   Train letters only. **Re-measure digits** — retention, not hope.
+4. **Phase C** — same for Fashion-MNIST (10 classes).
+
+The research record for this exact protocol (committed logs, Paper 1
+era): **digits retained >= 97%** (target met) after 26 letters were
+added to a trained digit network; the digits+letters joint assembly
+reached 92-93% with the old domain intact, and the forgetting
+resistance was later traced to mechanism, not luck: the noswitch
+SUM readout has no router to collapse, and "forgetting lives in the
+router, not the paths."
+
+`MPBrain.freeze_classes()` is irrevocable within a run (mirroring the
+research protocol where frozen experts are immutable); new capacity
+arrives exclusively through `birth_classes()`.
 
 ## Usage
 
@@ -80,10 +112,14 @@ bias compensation.
 ## Repository layout
 
 ```
-hahino_mp/core.py       MPBrain, PoolAdam, path utils (the machinery)
-examples/mnist_mp.py    MNIST training demo (the classic use)
-tests/test_core.py      CPU smoke tests (no dataset needed)
-reference/              the original research driver, unmodified
+hahino_mp/core.py                  MPBrain, PoolAdam, path utils, plus
+                                   freeze sovereignty (Law 4) and
+                                   continual class birth
+examples/mnist_mp.py               single-task MNIST training demo
+examples/continual_3dataset_mp.py  continual learning demo: 3 datasets,
+                                   no replay, frozen domains retained
+tests/test_core.py                 CPU smoke tests (no dataset needed)
+reference/                         the original research driver, unmodified
 ```
 
 ## Provenance & fidelity
@@ -95,7 +131,13 @@ de-globalizations — device follows the pool tensor instead of a
 module-global `DEVICE`; the input dim is a constructor argument
 instead of the hardcoded 784; the calibration batch is passed in
 instead of read from a global test set. No learning logic, constant,
-or growth rule was changed.
+or growth rule was changed. The continual-learning additions
+(`freeze_classes`, `birth_classes`, the pool gradient hook) are the
+class-level form of the same protocol the research drivers implemented
+by hand (digits frozen while letters trained) — including its two
+measured subtleties: frozen parameters are skipped by every
+growth/cleanup path, and new classes' head rows for old classes are
+zero-init so birth cannot leak into old columns.
 
 ## Paper lineage
 

@@ -113,3 +113,44 @@ def test_maintain_runs_growth_ladder():
     b.maintain(loader, epoch=1, calib_x=calib, verbose=False)
     assert b.pool.numel() >= n0  # grew or stayed (budget permitting)
     assert b(x).shape == (60, 3)
+
+
+def test_freeze_and_birth_classes():
+    torch.manual_seed(0)
+    b = MPBrain(num_classes=3, in_dim=12, initial_neurons=5)
+    x = torch.randn(8, 12)
+    y = torch.tensor([0, 1, 2, 0, 1, 2, 0, 1])
+    with torch.no_grad():
+        out_before = b(x)
+
+    # birth 2 new classes: old outputs preserved (old head rows kept,
+    # new head rows zero-init)
+    new_ids = b.birth_classes(2)
+    assert new_ids == [3, 4]
+    assert b.num_classes == 5
+    assert b(x).shape == (8, 5)
+    with torch.no_grad():
+        out_after = b(x)
+    assert torch.allclose(out_before, out_after[:, :3], atol=1e-6)
+
+    # freeze class 0: gradients in its segments are zeroed
+    b.freeze_classes([0])
+    b.pool_adam.zero_grad()
+    loss = torch.nn.functional.cross_entropy(b(x), y)
+    loss.backward()
+    d = b.descs[0][0]
+    g = b.pool.grad
+    assert g[d[0][1]:d[0][1] + d[0][3] * d[0][4]].abs().sum().item() == 0.0
+    assert g[d[1][1]:d[1][1] + d[1][3] * d[1][4]].abs().sum().item() == 0.0
+    # unfrozen class 1 got gradient
+    d1 = b.descs[1][0]
+    assert g[d1[0][1]:d1[0][1] + d1[0][3] * d1[0][4]].abs().sum().item() > 0
+
+    # maintain() skips frozen classes entirely
+    loader = [(x, y)]
+    pool_before = b.pool.numel()
+    b.maintain(loader, epoch=1, calib_x=x[:4], verbose=False)
+    descs0 = b.descs[0]
+    assert all(descs0 == d_ for d_ in [descs0])  # untouched reference
+    assert b.class_params(0) == sum(path_params(dd) for dd in descs0)
+    assert b.pool.numel() >= pool_before

@@ -148,9 +148,157 @@ class MPBrain(nn.Module):
         self.usage = {c: [1.0] for c in range(num_classes)}
         self.birth = {c: [0] for c in range(num_classes)}
         self.spawn_log = []
+        self.frozen_classes = set()
+        self._freeze_mask_cache = None
+        self._freeze_hook_handle = None
+        self._register_freeze_hook()
         self._fast_ready = False
         self._build_fast()
         self.prune_log = []
+
+    # ---- freeze sovereignty (Law 4) ---------------------------------------
+    # Frozen classes' parameters become IMMUTABLE: their gradient segments
+    # are zeroed by a hook on the flat pool, and every growth/cleanup
+    # path skips them. This is the class-level form of the research
+    # protocol (digits frozen while letters trained — v0.6/v0.8 era:
+    # digits retained >= 97% after 26 letters were added).
+
+    def freeze_classes(self, classes):
+        """Freeze (make immutable) the given classes. Irrevocable per run."""
+        self.frozen_classes |= set(int(c) for c in classes)
+        self._freeze_mask_cache = None
+
+    def _register_freeze_hook(self):
+        if getattr(self, '_freeze_hook_handle', None) is not None:
+            self._freeze_hook_handle.remove()
+        self._freeze_hook_handle = self.pool.register_hook(
+            self._apply_freeze)
+
+    def _frozen_mask(self, device):
+        key = (self.pool.numel(), frozenset(self.frozen_classes))
+        if self._freeze_mask_cache is not None \
+                and self._freeze_mask_cache[0] == key \
+                and self._freeze_mask_cache[1].device == device:
+            return self._freeze_mask_cache[1]
+        mask = torch.zeros(self.pool.numel(), dtype=torch.bool,
+                           device=device)
+        for c in self.frozen_classes:
+            if c >= len(self.descs):
+                continue
+            for d in self.descs[c]:
+                for (kind, wo, bo, o, i) in d:
+                    mask[wo:wo + o * i] = True
+                    mask[bo:bo + o] = True
+        self._freeze_mask_cache = (key, mask)
+        return mask
+
+    def _apply_freeze(self, grad):
+        if not self.frozen_classes:
+            return grad
+        return grad.masked_fill(
+            self._frozen_mask(grad.device), 0.0)
+
+    # ---- continual growth: birth new classes ------------------------------
+
+    def birth_classes(self, n_new, initial_neurons=None):
+        """Birth n_new new classes. Function-preserving: every existing
+        parameter (frozen or not) is carried into the new pool
+        unchanged; existing heads are re-headed to the new class count
+        with the new classes' columns ZERO-INIT (the research-sanctioned
+        class-growth init — zero-init prevents leak into old columns).
+        Only the new classes' blocks carry fresh weights. Returns the
+        new class ids."""
+        old_total = len(self.descs)
+        total = old_total + n_new
+        if initial_neurons is None:
+            initial_neurons = max(4, min(self.descs[0][0][0][3], 8))
+        old_pool = self.pool.data
+        dev = old_pool.device
+        new_pool = torch.zeros(0, device=dev)
+        index_map = torch.zeros(0, dtype=torch.long, device=dev)
+        cursor = 0
+        new_descs_all = []
+        for c, cd in enumerate(self.descs):
+            new_cd = []
+            for d in cd:
+                new_d = []
+                for li, (kind, wo, bo, o, i) in enumerate(d):
+                    no, ni = o, i
+                    if li == len(d) - 1:
+                        no = total          # re-head to new class count
+                    wlen, blen = no * ni, no
+                    w_off = cursor
+                    cursor += wlen
+                    b_off = cursor
+                    cursor += blen
+                    buf = torch.zeros(wlen + blen, device=dev)
+                    seg = torch.full((wlen + blen,), -1, dtype=torch.long,
+                                     device=dev)
+                    with torch.no_grad():
+                        if li == len(d) - 1:
+                            Wold = old_pool[wo:wo + o * i].view(o, i)
+                            buf[:o * i] = Wold.reshape(-1)   # old rows
+                            seg[:o * i] = wo + torch.arange(
+                                o * i, device=dev)
+                            buf[wlen:wlen + o] = old_pool[bo:bo + o]
+                            seg[wlen:wlen + o] = bo + torch.arange(
+                                o, device=dev)
+                            # new classes' head rows stay ZERO
+                        else:
+                            buf = old_pool[wo:wo + wlen + blen].clone()
+                            seg = torch.arange(wo, wo + wlen + blen,
+                                               device=dev)
+                    new_pool = torch.cat([new_pool, buf])
+                    index_map = torch.cat([index_map, seg])
+                    new_d.append((kind, w_off, b_off, no, ni))
+                new_cd.append(new_d)
+            new_descs_all.append(new_cd)
+        # fresh blocks for the new classes
+        fresh_descs = []
+        for _ in range(n_new):
+            w = initial_neurons
+            d = [('r', cursor, cursor + w * self.in_dim, w, self.in_dim)]
+            cursor += w * self.in_dim + w
+            d.append(('r', cursor, cursor + total * w, total, w))
+            cursor += total * w + total
+            wlen = d[0][3] * self.in_dim + d[0][3]
+            hlen = d[1][3] * d[1][4] + d[1][3]
+            fresh = torch.zeros(wlen + hlen, device=dev)
+            with torch.no_grad():
+                nn.init.kaiming_uniform_(
+                    fresh[:d[0][3] * self.in_dim].view(
+                        d[0][3], self.in_dim), a=5 ** 0.5)
+                nn.init.kaiming_uniform_(
+                    fresh[wlen:wlen + d[1][3] * d[1][4]].view(
+                        d[1][3], d[1][4]), a=5 ** 0.5)
+                # ZERO the new classes' head rows for EXISTING classes
+                # (zero-init class growth — prevents leak into old
+                # columns; research finding from the v29 fusion-head
+                # mechanics note)
+                fresh[wlen:wlen + old_total * w] = 0.0
+            new_pool = torch.cat([new_pool, fresh])
+            index_map = torch.cat([index_map, torch.full(
+                (wlen + hlen,), -1, dtype=torch.long, device=dev)])
+            fresh_descs.append([[tuple(l) for l in d]])
+        self.pool_adam.carry_to(self._swap_pool(new_pool), index_map)
+        new_descs_all.extend(fresh_descs)
+        self.descs = new_descs_all
+        self.num_classes = total
+        for c in range(old_total, total):
+            self.loss_history[c] = []
+            self.last_action[c] = None
+            self.usage[c] = [1.0]
+            self.birth[c] = [0]
+        self._freeze_mask_cache = None
+        self._register_freeze_hook()
+        self._build_fast()
+        return list(range(old_total, total))
+
+    def _swap_pool(self, new_data):
+        """Replace the pool Parameter, preserving the freeze hook."""
+        new_pool = nn.Parameter(new_data)
+        self.pool = new_pool
+        return new_pool
 
     def class_params(self, c):
         return sum(path_params(d) for d in self.descs[c])
@@ -331,6 +479,8 @@ class MPBrain(nn.Module):
     def cleanup(self, calib_x):
         dup = []
         for c in range(self.num_classes):
+            if c in self.frozen_classes:
+                continue
             for si, d in enumerate(self.descs[c]):
                 kind, wo, bo, o, i = d[0]
                 if o <= 5:
@@ -352,6 +502,8 @@ class MPBrain(nn.Module):
         calib = calib_x
         dead = []
         for c in range(self.num_classes):
+            if c in self.frozen_classes:
+                continue
             for si, d in enumerate(self.descs[c]):
                 kind, wo, bo, o, i = d[0]
                 if o <= 4:
@@ -594,6 +746,8 @@ class MPBrain(nn.Module):
             # <usage_min of their class after grace_epochs
             sp_ops = []
             for c in range(NC):
+                if c in self.frozen_classes:
+                    continue
                 K = len(self.descs[c])
                 if K < 2:
                     continue
@@ -641,6 +795,8 @@ class MPBrain(nn.Module):
             avg_acc = sum(accs) / len(accs)
             order = sorted(range(NC), key=lambda c: -losses[c])
             for c in order:
+                if c in self.frozen_classes:
+                    continue
                 hist = self.loss_history[c]
                 hist.append(losses[c])
                 hist[:] = hist[-4:]
