@@ -101,6 +101,25 @@ added to a trained digit network; forgetting resistance was traced to
 mechanism, not luck: the noswitch SUM readout has no router to
 collapse, and "forgetting lives in the router, not the paths."
 
+**Transfer + replay (the v08 research protocol, ported to this
+core)** — `examples/transfer_replay_mp.py`: digits frozen, 26 letter
+classes born, then every training step runs letters (36-way CE) and a
+digits replay batch (36-way CE); the freeze hook keeps digits
+immutable while letters paths learn calibrated digit-column
+suppression from real digit data. Measured 2026-11-07:
+
+| | digits | letters |
+|---|---|---|
+| before transfer | 96.44% | — |
+| after letters | **97.74% (+1.30)** | 89.27% |
+
+The record for this protocol was "digits IMPROVED +0.10 through joint
+sum training" — the direction reproduces and the gain is larger on
+this core (the replay-side calibration does real work; frozen weights
+never moved). Both continual recipes in this repo are therefore
+measured, not assumed: sovereign-brains+gate = exact retention; shared
+pool + replay = retention WITH improvement.
+
 The single-brain class-incremental variant is kept as
 `examples/class_incremental_stress.py` — a MEASURED NEGATIVE: one
 shared pool cannot hold this (unmasked softmax: digits 96.8% -> 0.0%;
