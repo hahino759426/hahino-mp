@@ -78,17 +78,39 @@ class-incremental protocol on one brain:
    Train letters only. **Re-measure digits** — retention, not hope.
 4. **Phase C** — same for Fashion-MNIST (10 classes).
 
-The research record for this exact protocol (committed logs, Paper 1
+MEASURED ON THIS EXACT CODE (2026-11-07, RTX 5060, seeds 42, full
+test sets — 10k MNIST + 20,800 EMNIST letters + 10k Fashion-MNIST):
+
+| Stage | digits | letters | fashion | gate |
+|---|---|---|---|---|
+| after its own phase | 96.44% | 89.73% | 86.38% | 99.79% |
+| after +26 letters | **96.44%** | 89.73% | — | — |
+| after +10 fashion | **96.44%** | **89.73%** | 86.38% | — |
+
+Assembled joint (gate routes raw 784 -> sovereign brain): **90.42%**
+46-way; gate routing accuracy 99.4-100% per domain. Retention is
+exact — frozen brains are byte-identical after later phases, so their
+accuracy cannot move. Honest gap to the research champions
+(93.25% 2-domain / letters 91.53%): this demo omits the shared
+canonicalizing stem (the README's largest measured lever for
+letters), the maturation pass (~+1.1 pts), and neuron-fork surgery.
+
+The research record for this protocol family (committed logs, Paper 1
 era): **digits retained >= 97%** (target met) after 26 letters were
-added to a trained digit network; the digits+letters joint assembly
-reached 92-93% with the old domain intact, and the forgetting
-resistance was later traced to mechanism, not luck: the noswitch
-SUM readout has no router to collapse, and "forgetting lives in the
-router, not the paths."
+added to a trained digit network; forgetting resistance was traced to
+mechanism, not luck: the noswitch SUM readout has no router to
+collapse, and "forgetting lives in the router, not the paths."
+
+The single-brain class-incremental variant is kept as
+`examples/class_incremental_stress.py` — a MEASURED NEGATIVE: one
+shared pool cannot hold this (unmasked softmax: digits 96.8% -> 0.0%;
+masked + frozen: still broken via OOD misfire and suppression
+gradient on shared head rows). Domains must own their experts.
 
 `MPBrain.freeze_classes()` is irrevocable within a run (mirroring the
 research protocol where frozen experts are immutable); new capacity
-arrives exclusively through `birth_classes()`.
+arrives through separate brains (continual recipe) or
+`birth_classes()` (single-task class growth).
 
 ## Usage
 
@@ -116,8 +138,10 @@ hahino_mp/core.py                  MPBrain, PoolAdam, path utils, plus
                                    freeze sovereignty (Law 4) and
                                    continual class birth
 examples/mnist_mp.py               single-task MNIST training demo
-examples/continual_3dataset_mp.py  continual learning demo: 3 datasets,
-                                   no replay, frozen domains retained
+examples/continual_3dataset_mp.py  continual learning, the recorded way:
+                                   3 sovereign brains + raw-pixel gate
+examples/class_incremental_stress.py  measured negative: one shared
+                                   pool cannot do continual learning
 tests/test_core.py                 CPU smoke tests (no dataset needed)
 reference/                         the original research driver, unmodified
 ```
