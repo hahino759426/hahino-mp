@@ -108,17 +108,23 @@ digits replay batch (36-way CE); the freeze hook keeps digits
 immutable while letters paths learn calibrated digit-column
 suppression from real digit data. Measured 2026-11-07:
 
-| | digits | letters |
-|---|---|---|
-| before transfer | 96.44% | — |
-| after letters | **97.74% (+1.30)** | 89.27% |
+3-domain measured table (2026-11-07, full test sets):
 
-The record for this protocol was "digits IMPROVED +0.10 through joint
-sum training" — the direction reproduces and the gain is larger on
-this core (the replay-side calibration does real work; frozen weights
-never moved). Both continual recipes in this repo are therefore
-measured, not assumed: sovereign-brains+gate = exact retention; shared
-pool + replay = retention WITH improvement.
+| | digits | letters | fashion |
+|---|---|---|---|
+| baseline | 96.44% | — | — |
+| after letters | 97.74% (+1.30) | 89.27% | — |
+| after fashion | **97.82% (+1.38)** | **90.24% (+0.97)** | 85.64% |
+
+Every frozen domain IMPROVES as later domains are added — monotone,
+no decay. The record for this protocol was "digits IMPROVED +0.10
+through joint sum training" — the direction reproduces and the gain
+is larger on this core (the replay-side calibration does real work;
+frozen weights never move; the improvement is the new paths'
+calibrated suppression learned from replay batches). Both continual
+recipes in this repo are therefore measured, not assumed:
+sovereign-brains+gate = exact retention; shared pool + replay =
+retention WITH improvement.
 
 The single-brain class-incremental variant is kept as
 `examples/class_incremental_stress.py` — a MEASURED NEGATIVE: one
